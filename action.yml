@@ -1,0 +1,61 @@
+name: "gh-trs-action"
+author: "suecharo"
+description: "The action for running continuous testing with `gh-trs` (https://github.com/suecharo/gh-trs)."
+
+inputs:
+  repo:
+    description: "The name of the repository to publish to. (like: owner/repo, default: your repo.)"
+    required: false
+    default: "${{ github.repository }}"
+  branch:
+    description: "The branch to publish to. (default: gh-pages)"
+    required: false
+    default: "gh-pages"
+  trs-endpoint:
+    description: "The TRS endpoint to publish to. (default: your default endpoint)"
+    required: false
+    default: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Download gh-trs binary from release"
+      id: "download-binary"
+      run: |
+        curl -fsSL -O https://github.com/suecharo/gh-trs/releases/latest/download/gh-trs
+        chmod +x ./gh-trs
+      shell: "bash"
+      working-directory: "/tmp/gh-trs"
+
+    - name: "Run tests and publish"
+      id: "test-and-publish"
+      run: |
+        mkdir -p ./test-logs
+        SAPPORO_RUN_DIR=/tmp/gh-trs/test-results ./gh-trs publish --verbose --with-test --repo ${{ inputs.repo }} --branch ${{ inputs.branch }} --from-trs ${{ inputs.trs-endpoint }} 2>&1 | tee ./test-logs/gh-trs.log
+        exit ${PIPESTATUS[0]}
+      shell: "bash"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      working-directory: "/tmp/gh-trs"
+
+    - name: "List test results"
+      id: "list-test-results"
+      run: ls -lR ./test-results > ./test-logs/results-list.txt
+      shell: "bash"
+      working-directory: "/tmp/gh-trs"
+
+    - name: "Upload test logs"
+      id: "upload-test-logs"
+      uses: actions/upload-artifact@v2
+      with:
+        name: gh-trs-test-logs
+        path: test-logs/*
+        if-no-files-found: ignore
+      working-directory: "/tmp/gh-trs"
+
+    - name: "Check test status"
+      id: "check-test-status"
+      if: ${{ steps.test-and-publish.outcome != 'success' }}
+      run: exit 1
+      shell: "bash"
+      working-directory: "/tmp/gh-trs"
